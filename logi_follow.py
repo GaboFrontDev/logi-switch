@@ -625,29 +625,77 @@ class Agent:
 class DeviceWatcher:
     """Avisa cuando se conecta/desconecta un dispositivo HID.
 
-    En Windows usa WM_DEVICECHANGE: revisar la lista de dispositivos varias veces
-    por segundo bloquea el administrador de dispositivos y hace tartamudear toda la
-    PC. En otros sistemas cae a revisar cada `interval` segundos.
+    - Windows: WM_DEVICECHANGE. Revisar la lista de dispositivos varias veces por
+      segundo bloquea el administrador de dispositivos y hace tartamudear la PC.
+    - macOS: callbacks de IOHIDManager (sin abrir los dispositivos). Ademas se sigue
+      revisando cada `interval` s como red de seguridad.
+    - Linux: revisar cada `interval` segundos.
     """
 
     def __init__(self, interval):
         self.interval = interval
         self.event = threading.Event()
         self.native = False
-        if sys.platform == "win32":
+        self._noted = False
+        loop = {"win32": self._win_loop, "darwin": self._mac_loop}.get(sys.platform)
+        if loop:
             ready = threading.Event()
-            threading.Thread(target=self._win_loop, args=(ready,), daemon=True).start()
+            threading.Thread(target=loop, args=(ready,), daemon=True).start()
             ready.wait(2)
+
+    def _notify(self):
+        if not self._noted and sys.platform == "darwin":
+            self._noted = True
+            log.info("avisos de dispositivos de macOS activos")
+        self.event.set()
 
     def wait(self, timeout):
         if not self.native:
             time.sleep(min(timeout, self.interval))
             return
+        if sys.platform == "darwin":
+            timeout = min(timeout, self.interval)   # red de seguridad por si un aviso no llega
         if self.event.wait(timeout):
             # los dispositivos Bluetooth aparecen por partes: juntar los avisos de
-            # la proxima medio segundo en una sola revision
-            time.sleep(0.5)
+            # la proxima fraccion de segundo en una sola revision
+            time.sleep(0.3)
             self.event.clear()
+
+    def _mac_loop(self, ready):
+        import ctypes
+        import ctypes.util
+        try:
+            cf = ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreFoundation"))
+            iokit = ctypes.cdll.LoadLibrary(ctypes.util.find_library("IOKit"))
+            CB = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+
+            iokit.IOHIDManagerCreate.restype = ctypes.c_void_p
+            iokit.IOHIDManagerCreate.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+            iokit.IOHIDManagerSetDeviceMatching.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            iokit.IOHIDManagerRegisterDeviceMatchingCallback.argtypes = [ctypes.c_void_p, CB, ctypes.c_void_p]
+            iokit.IOHIDManagerRegisterDeviceRemovalCallback.argtypes = [ctypes.c_void_p, CB, ctypes.c_void_p]
+            iokit.IOHIDManagerScheduleWithRunLoop.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+            cf.CFRunLoopGetCurrent.restype = ctypes.c_void_p
+            mode = ctypes.c_void_p.in_dll(cf, "kCFRunLoopDefaultMode")
+
+            def cb(context, result, sender, device):
+                self._notify()
+
+            self._cb = CB(cb)   # mantener la referencia viva
+            mgr = iokit.IOHIDManagerCreate(None, 0)
+            iokit.IOHIDManagerSetDeviceMatching(mgr, None)          # todos los HID
+            iokit.IOHIDManagerRegisterDeviceMatchingCallback(mgr, self._cb, None)
+            iokit.IOHIDManagerRegisterDeviceRemovalCallback(mgr, self._cb, None)
+            # No se llama IOHIDManagerOpen: abriria todos los dispositivos y podria
+            # chocar con hidapi al hablar con el mouse. Solo queremos los avisos.
+            iokit.IOHIDManagerScheduleWithRunLoop(mgr, cf.CFRunLoopGetCurrent(), mode)
+            self.native = True
+        except Exception as e:
+            log.warning("sin avisos de dispositivos de macOS (%s); revisando cada %.1f s", e, self.interval)
+            ready.set()
+            return
+        ready.set()
+        cf.CFRunLoopRun()
 
     def _win_loop(self, ready):
         import ctypes
