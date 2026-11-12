@@ -423,9 +423,10 @@ def start_key_listener(kb_map, on_target_channel):
 # El firmware follow del Keychron cuenta cambios rapidos de Bloq Despl / Bloq Mayus:
 # 4 = host 1, 6 = host 2, 8 = host 3. Siempre un numero par: la luz queda igual.
 
-LED_STEP = 0.08       # Windows: segundos entre cambios (el firmware acepta hasta 0.25)
-LED_STEP_MAC = 0.17   # macOS junta cambios muy seguidos antes de mandarlos por Bluetooth
-                      # (el teclado parpadea pero cuenta menos); mas lento, sin pasar de 0.25
+LED_STEP = 0.08       # Windows: segundos entre cambios (el firmware acepta hasta 0.7)
+LED_STEP_MAC = 0.30   # macOS no manda los cambios a ritmo parejo por Bluetooth: muy
+                      # seguidos los junta y a veces retrasa uno. 0.3 s queda lejos de
+                      # ambos limites (firmware follow >= 16:10 del 2026-11-12 acepta 0.7)
 
 
 def _toggles_for(host):

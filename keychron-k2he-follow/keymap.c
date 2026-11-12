@@ -111,13 +111,14 @@ static uint32_t follow_fire(uint32_t trigger_time, void *cb_arg) {
  * luces (Bloq Mayus / Bloq Despl). La app las cambia rapido un numero par de
  * veces (quedan como estaban):
  *     4 cambios = host 1,   6 = host 2,   8 = host 3
- * cada cambio a menos de 250 ms del anterior. Windows usa Bloq Despl y macOS
- * Bloq Mayus; aqui se cuentan los dos.
+ * cada cambio a menos de 700 ms del anterior. Windows usa Bloq Despl y macOS
+ * Bloq Mayus; aqui se cuentan los dos. (Con 250 ms macOS a veces retrasaba un
+ * cambio de mas y la secuencia se partia en dos.)
  * --------------------------------------------------------------------- */
 #ifdef LK_WIRELESS_ENABLE
 #    include "wireless.h"
 
-#    define LEDCMD_GAP_MS 250
+#    define LEDCMD_GAP_MS 700
 
 static uint8_t        ledcmd_count = 0;
 static uint16_t       ledcmd_last;

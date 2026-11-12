@@ -12,7 +12,7 @@ En la PC, `logi_follow.py --keys` ve esa tecla y manda el MX Master al mismo can
 
 **Cambio pedido desde la PC:** por Bluetooth lo único que la PC le manda al teclado es el
 estado de las luces. Si Bloq Despl o Bloq Mayús cambian **4, 6 u 8 veces** seguidas (cada cambio
-a menos de 250 ms del anterior), el teclado se va al **host 1, 2 o 3**. Siempre es un número
+a menos de 700 ms del anterior), el teclado se va al **host 1, 2 o 3**. Siempre es un número
 par, así que la luz queda como estaba. La app Logi Switch lo usa al dar clic en un canal.
 
 > El cambio de host solo existe en modo **Bluetooth** (3 hosts). En 2.4 GHz hay un solo host,
