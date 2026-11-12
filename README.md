@@ -14,28 +14,60 @@ y hace que el mouse **siga al teclado** cuando el teclado cambia de computadora.
 
 Habla directo con el mouse por el protocolo HID++ 2.0 de Logitech (función `0x1814 Change Host`).
 
-## Descargar
+## Instalar en macOS
 
-En [Releases](../../releases) hay builds para **macOS (Apple Silicon)** y **Windows**, generados
-por GitHub Actions.
+Instala **y actualiza** con un solo comando en la Terminal:
 
-- **macOS (recomendado):** instala o actualiza con un comando:
-  ```
-  curl -fsSL https://raw.githubusercontent.com/GaboFrontDev/logi-switch/main/mac/install.sh | bash
-  ```
-  Descarga la última versión, la pone en Aplicaciones y la firma con un certificado propio
-  ("Logi Switch Local", se crea una vez en tu llavero). Así macOS **conserva los permisos** entre
-  versiones; sin firma, cada versión nueva cuenta como otra app y hay que volver a darlos.
-  La primera vez da permiso en Ajustes del Sistema → Privacidad y seguridad →
-  **Monitoreo de entrada** (para hablar con el mouse) y **Accesibilidad** (para escuchar F18–F20 del
-  Keychron y cambiar Bloq Mayús).
-- **macOS (a mano):** descomprime el `.zip` y mueve `Logi Switch.app` a Aplicaciones; la primera vez
-  ábrela con **clic derecho → Abrir**.
-- **Windows:** `Logi Switch.exe`. SmartScreen puede avisar: *Más información → Ejecutar de todas
-  formas*. Permite el firewall en redes **privadas** (puerto UDP 47811).
+```bash
+curl -fsSL https://raw.githubusercontent.com/GaboFrontDev/logi-switch/main/mac/install.sh | bash
+```
+
+El script ([`mac/install.sh`](mac/install.sh)):
+
+1. **Solo la primera vez:** crea un certificado de firma llamado **"Logi Switch Local"** en tu
+   llavero. macOS te pide tu contraseña para confiar en él (solo para firmar código).
+2. Descarga la última versión de [Releases](../../releases) (Apple Silicon).
+3. Cierra la app si está abierta y la reemplaza en `/Applications`.
+4. Le quita la cuarentena (no sale el aviso de "no se puede verificar").
+5. La firma con tu certificado y la abre.
+
+**¿Por qué firmarla?** macOS guarda los permisos según la firma de la app. Sin firma, cada versión
+nueva cuenta como otra app y hay que volver a dar los permisos. Firmada siempre con el mismo
+certificado, los conserva.
+
+### Permisos (primera vez)
+
+En Ajustes del Sistema → Privacidad y seguridad, activa Logi Switch en:
+
+- **Monitoreo de entrada:** para hablar con el mouse.
+- **Accesibilidad:** para escuchar F18–F20 del Keychron y cambiar Bloq Mayús.
+
+Luego ciérrala (clic derecho → **Salir**) y ábrela de nuevo.
+
+Si venías de una versión sin firmar y los permisos "no se aplican", bórralos y dalos otra vez:
+
+```bash
+tccutil reset ListenEvent io.github.logi-switch
+tccutil reset Accessibility io.github.logi-switch
+```
+
+### A mano
+
+Descarga `LogiSwitch-macos-arm64.zip` de [Releases](../../releases), descomprime y mueve
+`Logi Switch.app` a Aplicaciones. La primera vez ábrela con **clic derecho → Abrir**. Con este
+método los permisos se pierden en cada actualización.
+
+## Instalar en Windows
+
+Descarga `LogiSwitch-windows-x64.zip` de [Releases](../../releases) y abre `Logi Switch.exe`.
+SmartScreen puede avisar: *Más información → Ejecutar de todas formas*. Permite el firewall en
+redes **privadas** (puerto UDP 47811).
+
+## Primer uso
 
 Conecta el mouse **una vez** a cada máquina con la app abierta para que aprenda su canal (se guarda
-en `~/.logi_follow.json`).
+en `~/.logi_follow.json`). Activa **Abrir al iniciar sesión** (clic derecho en una zona vacía de
+la ventana) en cada máquina: el mouse solo sigue al teclado si la app está corriendo.
 
 ## La ventana
 
