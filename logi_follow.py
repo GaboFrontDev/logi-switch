@@ -393,9 +393,19 @@ def start_key_listener(kb_map, on_target_channel):
         log.info("teclado se va al host %d -> mouse al canal %d", host, channel)
         on_target_channel(channel)
 
-    keyboard.Listener(on_press=on_press, daemon=True).start()
+    try:
+        listener = keyboard.Listener(on_press=on_press, daemon=True)
+        listener.start()
+    except Exception as e:
+        log.error("no pude escuchar el teclado: %s", e)
+        return
     log.info("escuchando F18/F19/F20 del teclado (mapa host->canal: %s)",
              {h: kb_map.get(h, h) for h in (1, 2, 3)})
+    if sys.platform == "darwin":
+        listener.wait()
+        if not getattr(listener, "IS_TRUSTED", True):
+            log.error("macOS NO le dio permiso a la app para oir el teclado: activala en Ajustes > "
+                      "Privacidad y seguridad > Accesibilidad y Monitoreo de entrada, y reinicia la app")
 
 
 def parse_kb_map(s):
@@ -452,7 +462,11 @@ class Agent:
     def switch_to(self, channel):
         """Manda el mouse al canal. Devuelve True si se envio."""
         with self.lock:
-            if self.mouse.path is None or channel == self.cfg.get("mouse_channel"):
+            if self.mouse.path is None:
+                log.info("no muevo el mouse al canal %d: no esta conectado a esta maquina", channel)
+                return False
+            if channel == self.cfg.get("mouse_channel"):
+                log.info("no muevo el mouse: ya esta en el canal %d", channel)
                 return False
             try:
                 self.mouse.switch(channel)
@@ -490,6 +504,10 @@ class Agent:
                         log.warning("no pude leer el canal del mouse: %s", e)
                         mouse.path = None
             self._publish()
+            if kb_was is None:   # primera revision: dejar constancia de lo que se ve
+                logi = [d for d in devices if d["vendor_id"] == LOGI_VID]
+                log.info("dispositivos HID: %d (Logitech: %d); mouse con Change Host aqui: %s",
+                         len(devices), len(logi), "si" if mouse.path else "no")
 
             # --- teclado: avisar cuando llega
             kb = keyboard_present(devices, args.kb_vid, args.kb_pid)
@@ -604,6 +622,30 @@ def run_agent(args):
     Agent(args).run()
 
 
+LOG_PATH = os.path.join(os.path.expanduser("~"), ".logi_follow.log")
+
+
+def setup_logging():
+    """Siempre a ~/.logi_follow.log (en la .app de macOS no hay consola visible);
+    tambien a la consola si hay una."""
+    import platform
+    from logging.handlers import RotatingFileHandler
+    fmt = logging.Formatter("%(asctime)s %(message)s", datefmt="%m-%d %H:%M:%S")
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    try:
+        fh = RotatingFileHandler(LOG_PATH, maxBytes=512 * 1024, backupCount=1, encoding="utf-8")
+        fh.setFormatter(fmt)
+        root.addHandler(fh)
+    except OSError:
+        pass
+    if sys.stderr is not None:
+        sh = logging.StreamHandler()
+        sh.setFormatter(fmt)
+        root.addHandler(sh)
+    log.info("---- inicio: %s %s, python %s", platform.system(), platform.release(), platform.python_version())
+
+
 def hexint(s):
     return int(s, 16)
 
@@ -632,11 +674,7 @@ def build_parser():
 def main():
     args = build_parser().parse_args()
 
-    log_kw = {}
-    if sys.stderr is None:  # pythonw / arranque automatico: sin consola, loguear a archivo
-        log_kw["filename"] = os.path.join(os.path.expanduser("~"), ".logi_follow.log")
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s",
-                        datefmt="%m-%d %H:%M:%S", **log_kw)
+    setup_logging()
 
     if args.info or args.switch:
         devices = hid.enumerate()

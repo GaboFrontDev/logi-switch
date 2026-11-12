@@ -274,12 +274,7 @@ def main():
     except ImportError:
         args.keys = False
 
-    log_kw = {}
-    if sys.stderr is None:
-        import os
-        log_kw["filename"] = os.path.join(os.path.expanduser("~"), ".logi_follow.log")
-    lf.logging.basicConfig(level=lf.logging.INFO, format="%(asctime)s %(message)s",
-                           datefmt="%m-%d %H:%M:%S", **log_kw)
+    lf.setup_logging()
 
     global S
     if WIN:
