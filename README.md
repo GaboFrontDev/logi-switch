@@ -19,10 +19,18 @@ Habla directo con el mouse por el protocolo HID++ 2.0 de Logitech (función `0x1
 En [Releases](../../releases) hay builds para **macOS (Apple Silicon)** y **Windows**, generados
 por GitHub Actions.
 
-- **macOS:** descomprime y mueve `Logi Switch.app` a Aplicaciones. No está firmada: la primera vez
-  ábrela con **clic derecho → Abrir**. Da permiso en Ajustes del Sistema → Privacidad y seguridad →
+- **macOS (recomendado):** instala o actualiza con un comando:
+  ```
+  curl -fsSL https://raw.githubusercontent.com/GaboFrontDev/logi-switch/main/mac/install.sh | bash
+  ```
+  Descarga la última versión, la pone en Aplicaciones y la firma con un certificado propio
+  ("Logi Switch Local", se crea una vez en tu llavero). Así macOS **conserva los permisos** entre
+  versiones; sin firma, cada versión nueva cuenta como otra app y hay que volver a darlos.
+  La primera vez da permiso en Ajustes del Sistema → Privacidad y seguridad →
   **Monitoreo de entrada** (para hablar con el mouse) y **Accesibilidad** (para escuchar F18–F20 del
-  Keychron).
+  Keychron y cambiar Bloq Mayús).
+- **macOS (a mano):** descomprime el `.zip` y mueve `Logi Switch.app` a Aplicaciones; la primera vez
+  ábrela con **clic derecho → Abrir**.
 - **Windows:** `Logi Switch.exe`. SmartScreen puede avisar: *Más información → Ejecutar de todas
   formas*. Permite el firewall en redes **privadas** (puerto UDP 47811).
 
