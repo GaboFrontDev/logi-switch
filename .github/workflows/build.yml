@@ -1,0 +1,66 @@
+name: build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest      # Apple Silicon
+            name: macos-arm64
+          - os: windows-latest
+            name: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependencias
+        run: python -m pip install pyinstaller hidapi pynput
+
+      - name: Build macOS
+        if: runner.os == 'macOS'
+        run: |
+          python -m PyInstaller --noconfirm --windowed --name "Logi Switch" \
+            --osx-bundle-identifier io.github.logi-switch \
+            --hidden-import pynput.keyboard._darwin --hidden-import pynput.mouse._darwin \
+            logi_follow_ui.py
+          ditto -c -k --keepParent "dist/Logi Switch.app" "LogiSwitch-${{ matrix.name }}.zip"
+
+      - name: Build Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --onefile --windowed --name "Logi Switch" `
+            --hidden-import pynput.keyboard._win32 --hidden-import pynput.mouse._win32 `
+            logi_follow_ui.py
+          Compress-Archive -Path "dist/Logi Switch.exe" -DestinationPath "LogiSwitch-${{ matrix.name }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LogiSwitch-${{ matrix.name }}
+          path: LogiSwitch-${{ matrix.name }}.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: LogiSwitch-*.zip
+          generate_release_notes: true
