@@ -101,7 +101,7 @@ python3 logi_follow.py --keys    # agente sin ventana
 | `--group nombre` | Separar grupos de máquinas (igual en todas) |
 | `--kb-vid/--kb-pid` | Otro teclado Bluetooth como "líder" (hex) |
 | `--mouse-pid` | Elegir el mouse si tienes varios (hex) |
-| `--interval 1` | macOS/Linux: cada cuánto revisa dispositivos. En Windows usa avisos del sistema |
+| `--interval 1` | Linux: cada cuánto revisa dispositivos. En macOS es solo red de seguridad; Windows y macOS usan avisos del sistema |
 
 ### Linux
 
@@ -125,5 +125,6 @@ Luego `sudo udevadm control --reload && sudo udevadm trigger` y reconecta los di
 - Probado en Windows 11 y macOS (Apple Silicon) con MX Master 4, Keychron K2 HE y HHKB Hybrid.
   Linux: el código está, pero falta probarlo.
 - El HHKB no se puede mover desde la app (firmware cerrado): con él el cambio siempre empieza en
-  el teclado (`Fn+Ctrl+número`) y el mouse lo sigue por red, ~1–2 s después.
+  el teclado (`Fn+Ctrl+número`) y el mouse lo sigue por red, en cuanto el sistema ve llegar al
+  teclado (Windows y macOS avisan al instante).
 - Cualquier equipo de tu red puede mandar un aviso y mover el mouse; no hay autenticación.
