@@ -178,7 +178,7 @@ class Hidpp:
 
     def feature_index(self, feature_id):
         r = self.request(FEAT_ROOT, 0, (feature_id >> 8, feature_id & 0xFF))
-        return r[4] if r else 0
+        return r[4] if r else None   # None = no contesto; 0 = no tiene esa funcion
 
     def host_info(self, idx):
         """(numero de canales, canal actual 1-based)"""
@@ -207,8 +207,10 @@ def hidpp_candidates(devices):
 class Mouse:
     """Encuentra el mouse con Change Host y recuerda su ruta/feature index."""
 
-    def __init__(self, pid_filter=None):
+    def __init__(self, pid_filter=None, known_pid=None):
         self.pid_filter = pid_filter
+        self.known_pid = known_pid   # PID del mouse ya encontrado antes (config)
+        self.pid = None
         self.path = None
         self.idx = None
         self.bad_paths = set()   # colecciones que no son HID++ / no tienen Change Host
@@ -230,15 +232,31 @@ class Mouse:
                 continue
             if d["path"] in self.bad_paths or time.monotonic() < self.retry_at.get(d["path"], 0):
                 continue
+            pid = d["product_id"]
+            # Mouse ya conocido o dispositivo Bluetooth de Logitech (PID 0xBxxx): si falla
+            # es casi seguro que se esta conectando -> reintentar pronto, nunca descartar.
+            # Lo demas (p. ej. interfaces USB del G502): descartar al primer fallo, para no
+            # tocarlo seguido (eso hacia tartamudear la PC).
+            likely = pid == self.known_pid or 0xB000 <= pid <= 0xBFFF
+
+            def failed():
+                if likely:
+                    self.retry_at[d["path"]] = time.monotonic() + 2
+                else:
+                    self.bad_paths.add(d["path"])
+
             try:
                 h = Hidpp(d["path"])
             except Exception:
-                self.bad_paths.add(d["path"])
+                failed()
                 continue
             try:
                 idx = h.feature_index(FEAT_CHANGE_HOST)
+                if idx is None:          # no contesto (puede estar conectandose)
+                    failed()
+                    continue
                 if idx:
-                    self.path, self.idx = d["path"], idx
+                    self.path, self.idx, self.pid = d["path"], idx, pid
                     name = d.get("product_string")
                     if not name:   # la lista rapida no trae el nombre: pedirselo al dispositivo
                         try:
@@ -247,17 +265,9 @@ class Mouse:
                             name = None
                     self.name = (name or "PID %04X" % d["product_id"]).strip()
                     return True
-                self.bad_paths.add(d["path"])
-            except HidppError as e:
-                if "write" in str(e):
-                    # no acepta reportes HID++ largos (p. ej. la interfaz de movimiento
-                    # del G502): no es lo que buscamos. No volver a tocarla.
-                    self.bad_paths.add(d["path"])
-                else:
-                    self.retry_at[d["path"]] = time.monotonic() + 10
+                self.bad_paths.add(d["path"])   # contesto, pero no tiene Change Host
             except Exception:
-                # puede estar reconectando; reintentar en 10 s, no en cada vuelta
-                self.retry_at[d["path"]] = time.monotonic() + 10
+                failed()
             finally:
                 h.close()
         return False
@@ -408,6 +418,76 @@ def start_key_listener(kb_map, on_target_channel):
                       "Privacidad y seguridad > Accesibilidad y Monitoreo de entrada, y reinicia la app")
 
 
+# ------------------------------------- pedirle al teclado que cambie de host -----
+# Por Bluetooth lo unico que la PC le manda al teclado es el estado de las luces.
+# El firmware follow del Keychron cuenta cambios rapidos de Bloq Despl / Bloq Mayus:
+# 4 = host 1, 6 = host 2, 8 = host 3. Siempre un numero par: la luz queda igual.
+
+LED_STEP = 0.08   # segundos entre cambios (el firmware acepta hasta 0.25)
+
+
+def _toggles_for(host):
+    return 2 * (host + 1)
+
+
+def _blink_windows(n):
+    import ctypes
+    VK_SCROLL, KEYUP = 0x91, 0x0002
+    user32 = ctypes.windll.user32
+    for _ in range(n):
+        user32.keybd_event(VK_SCROLL, 0x46, 0, 0)
+        user32.keybd_event(VK_SCROLL, 0x46, KEYUP, 0)
+        time.sleep(LED_STEP)
+
+
+def _blink_mac(n):
+    # macOS ignora Bloq Despl: se usa Bloq Mayus via IOKit (IOHIDSetModifierLockState)
+    import ctypes
+    import ctypes.util
+    iokit = ctypes.cdll.LoadLibrary(ctypes.util.find_library("IOKit"))
+    libc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("System"))
+    iokit.IOServiceMatching.restype = ctypes.c_void_p
+    iokit.IOServiceGetMatchingService.restype = ctypes.c_uint
+    iokit.IOServiceGetMatchingService.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+    service = iokit.IOServiceGetMatchingService(0, iokit.IOServiceMatching(b"IOHIDSystem"))
+    if not service:
+        raise OSError("IOHIDSystem no encontrado")
+    task = ctypes.c_uint.in_dll(libc, "mach_task_self_").value
+    conn = ctypes.c_uint()
+    if iokit.IOServiceOpen(service, task, 1, ctypes.byref(conn)) != 0:   # kIOHIDParamConnectType
+        raise OSError("IOServiceOpen fallo")
+    try:
+        state = ctypes.c_bool()
+        iokit.IOHIDGetModifierLockState(conn, 1, ctypes.byref(state))    # kIOHIDCapsLockState
+        cur = state.value
+        for _ in range(n):
+            cur = not cur
+            iokit.IOHIDSetModifierLockState(conn, 1, cur)
+            time.sleep(LED_STEP)
+    finally:
+        iokit.IOServiceClose(conn)
+
+
+def send_keyboard_host(host):
+    """Pide al teclado (firmware follow) que se vaya al host 1-3. True si se mando."""
+    if host not in (1, 2, 3):
+        return False
+    n = _toggles_for(host)
+    try:
+        if sys.platform == "win32":
+            _blink_windows(n)
+        elif sys.platform == "darwin":
+            _blink_mac(n)
+        else:
+            log.info("pedir cambio al teclado aun no esta hecho en Linux")
+            return False
+        log.info("teclado -> host %d (%d cambios de luz)", host, n)
+        return True
+    except Exception as e:
+        log.warning("no pude mandar el cambio al teclado: %s", e)
+        return False
+
+
 def parse_kb_map(s):
     """'1:2,2:1,3:3' -> {1: 2, 2: 1, 3: 3} (host del teclado -> canal del mouse)"""
     out = {}
@@ -430,7 +510,7 @@ class Agent:
         self.cfg = load_config()
         self.cfg.setdefault("machine_id", uuid.uuid4().hex)
         save_config(self.cfg)
-        self.mouse = Mouse(args.mouse_pid)
+        self.mouse = Mouse(args.mouse_pid, known_pid=self.cfg.get("mouse_pid"))
         self.count = None
         self.lock = threading.Lock()
         self._last_state = None
@@ -476,6 +556,14 @@ class Agent:
                 log.warning("no pude cambiar el mouse: %s", e)
                 return False
 
+    def switch_both(self, channel):
+        """Desde la app: manda el teclado (Keychron con firmware follow) y luego el mouse."""
+        inverse = {c: h for h, c in self.args.kb_map.items()}
+        host = inverse.get(channel, channel)
+        if send_keyboard_host(host):
+            time.sleep(0.15)   # que el teclado empiece a irse antes que el mouse
+        return self.switch_to(channel)
+
     def on_claim(self, channel):
         self.switch_to(channel)
 
@@ -496,8 +584,9 @@ class Agent:
                 if not mouse.present_in(devices) and mouse.probe(devices):
                     try:
                         self.count, cur = mouse.host_info()
-                        if cfg.get("mouse_channel") != cur:
+                        if cfg.get("mouse_channel") != cur or cfg.get("mouse_pid") != mouse.pid:
                             cfg["mouse_channel"] = cur
+                            cfg["mouse_pid"] = mouse.known_pid = mouse.pid
                             save_config(cfg)
                         log.info("mouse %s conectado aqui: canal %d de %d", mouse.name, cur, self.count)
                     except Exception as e:

@@ -3,7 +3,9 @@
 Cambia el canal Easy-Switch de un mouse Logitech (probado con MX Master 4) **sin Logi Options+**,
 y hace que el mouse **siga al teclado** cuando el teclado cambia de computadora.
 
-- **Ventana minimal** con los tres canales: clic en uno y el mouse se va ahí.
+- **Ventana minimal** con los tres canales: clic en uno y el mouse se va ahí. Con el Keychron
+  K2 HE con firmware follow, **el teclado también se va** (la app se lo pide parpadeando
+  Bloq Despl en Windows o Bloq Mayús en macOS: 4/6/8 cambios = host 1/2/3).
 - **El mouse sigue al teclado:**
   - **Keychron K2 HE** con el firmware de `keychron-k2he-follow/`: `Fn+1/2/3` avisa a la PC antes
     de cambiar y el mouse se va al mismo canal al instante, sin red.

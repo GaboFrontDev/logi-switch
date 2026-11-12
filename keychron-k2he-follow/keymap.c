@@ -104,6 +104,58 @@ static uint32_t follow_fire(uint32_t trigger_time, void *cb_arg) {
 }
 #endif
 
+/* ------------------------------------------------------------------------
+ * Cambio de host pedido DESDE LA PC, usando las luces del teclado.
+ *
+ * Por Bluetooth lo unico que la PC le manda al teclado es el estado de las
+ * luces (Bloq Mayus / Bloq Despl). La app las cambia rapido un numero par de
+ * veces (quedan como estaban):
+ *     4 cambios = host 1,   6 = host 2,   8 = host 3
+ * cada cambio a menos de 250 ms del anterior. Windows usa Bloq Despl y macOS
+ * Bloq Mayus; aqui se cuentan los dos.
+ * --------------------------------------------------------------------- */
+#ifdef LK_WIRELESS_ENABLE
+#    include "wireless.h"
+
+#    define LEDCMD_GAP_MS 250
+
+static uint8_t        ledcmd_count = 0;
+static uint16_t       ledcmd_last;
+static bool           ledcmd_init = false;
+static led_t          ledcmd_prev;
+static deferred_token ledcmd_token = INVALID_DEFERRED_TOKEN;
+
+static uint32_t ledcmd_check(uint32_t trigger_time, void *cb_arg) {
+    if (timer_elapsed(ledcmd_last) < LEDCMD_GAP_MS) {
+        return 50;   // todavia llegan cambios
+    }
+    uint8_t n    = ledcmd_count;
+    ledcmd_count = 0;
+    ledcmd_token = INVALID_DEFERRED_TOKEN;
+    if (get_transport() == TRANSPORT_BLUETOOTH && n >= 4 && n <= 8 && n % 2 == 0) {
+        wireless_connect_ex(n / 2 - 1, 0);   // 4->1, 6->2, 8->3
+    }
+    return 0;
+}
+
+bool led_update_user(led_t state) {
+    if (!ledcmd_init) {
+        ledcmd_init = true;
+        ledcmd_prev = state;
+        return true;
+    }
+    if (state.caps_lock != ledcmd_prev.caps_lock || state.scroll_lock != ledcmd_prev.scroll_lock) {
+        ledcmd_count++;
+        ledcmd_last = timer_read();
+        if (ledcmd_token == INVALID_DEFERRED_TOKEN) {
+            ledcmd_token = defer_exec(50, ledcmd_check, NULL);
+        }
+    }
+    ledcmd_prev = state;
+    return true;
+}
+#endif
+
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 #ifdef LK_WIRELESS_ENABLE
     if (keycode >= BT_HST1 && keycode <= BT_HST3 && get_transport() == TRANSPORT_BLUETOOTH) {

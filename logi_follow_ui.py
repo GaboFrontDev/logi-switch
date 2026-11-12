@@ -361,7 +361,7 @@ class App:
         self.draw()
 
         def go():
-            if not self.agent.switch_to(n):
+            if not self.agent.switch_both(n):     # teclado (luces) y luego el mouse
                 self.sending = None
                 self.q.put(self.agent.state())
         threading.Thread(target=go, daemon=True).start()
