@@ -8,10 +8,17 @@ Keychron y los avisos por red), y agrega los tres canales para cambiar a mano.
   python logi_follow_ui.py        (en Windows sin consola: pythonw logi_follow_ui.py)
 
 Clic en un numero = mandar el mouse a ese canal. Clic derecho = ponerle nombre.
-Teclas 1/2/3 tambien. Arrastra para mover. Esc o la x (aparece al pasar) = cerrar.
+Teclas 1/2/3 tambien. Arrastra para mover.
+Esc o la x (aparece al pasar) = esconder la ventana; el agente sigue corriendo.
+Volver a abrir la app muestra la ventana. Clic derecho en una zona vacia =
+"Abrir al iniciar sesion" y "Salir".
+
+  --hidden   arrancar sin mostrar la ventana (lo usa el inicio automatico)
 """
 
+import os
 import queue
+import socket
 import sys
 import threading
 import tkinter as tk
@@ -50,7 +57,7 @@ def font(families, size, weight="normal"):
     return tkfont.Font(size=size, weight=weight)
 
 
-def win_frameless(root):
+def win_frameless(root, show=True):
     """Sin barra de titulo, esquinas redondeadas, modo oscuro (Windows 11)."""
     # overrideredirect: tkinter sabe que no hay barra ni bordes. (Quitar el estilo
     # a mano hacia que tkinter "compensara" bordes inexistentes y la ventana se
@@ -69,12 +76,115 @@ def win_frameless(root):
     ex = user32.GetWindowLongW(hwnd, -20)
     user32.SetWindowLongW(hwnd, -20, (ex | 0x00040000) & ~0x00000080)  # +APPWINDOW, -TOOLWINDOW
     root.withdraw()
-    root.after(10, root.deiconify)
+    if show:
+        root.after(10, root.deiconify)
 
     for attr, v in ((20, 1), (33, 2)):           # modo oscuro, esquinas redondeadas
         val = ctypes.c_int(v)
         dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(val), ctypes.sizeof(val))
     return hwnd
+
+
+# ---------------------------------------------------- inicio automatico ----
+APP_ID = "io.github.logi-switch"
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+
+def launch_args():
+    """Comando para volver a lanzar esta app (sin mostrar ventana)."""
+    if getattr(sys, "frozen", False):                 # app empaquetada (PyInstaller)
+        exe = sys.executable
+        if sys.platform == "darwin" and ".app/" in exe:
+            bundle = exe[: exe.index(".app/") + 4]
+            return ["/usr/bin/open", "-a", bundle, "--args", "--hidden"]
+        return [exe, "--hidden"]
+    py = sys.executable
+    if WIN and py.lower().endswith("python.exe"):
+        py = py[:-10] + "pythonw.exe"                  # sin consola
+    return [py, os.path.abspath(__file__), "--hidden"]
+
+
+def _mac_plist():
+    return os.path.expanduser("~/Library/LaunchAgents/%s.plist" % APP_ID)
+
+
+def _linux_desktop():
+    return os.path.expanduser("~/.config/autostart/logi-switch.desktop")
+
+
+def autostart_enabled():
+    try:
+        if WIN:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
+                winreg.QueryValueEx(k, "LogiSwitch")
+            return True
+        if sys.platform == "darwin":
+            return os.path.exists(_mac_plist())
+        return os.path.exists(_linux_desktop())
+    except OSError:
+        return False
+
+
+def set_autostart(on):
+    args = launch_args()
+    if WIN:
+        import subprocess
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
+            if on:
+                winreg.SetValueEx(k, "LogiSwitch", 0, winreg.REG_SZ, subprocess.list2cmdline(args))
+            else:
+                try:
+                    winreg.DeleteValue(k, "LogiSwitch")
+                except FileNotFoundError:
+                    pass
+    elif sys.platform == "darwin":
+        import plistlib
+        path = _mac_plist()
+        if on:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                plistlib.dump({"Label": APP_ID, "ProgramArguments": args, "RunAtLoad": True}, f)
+        elif os.path.exists(path):
+            os.remove(path)
+    else:
+        import shlex
+        path = _linux_desktop()
+        if on:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write("[Desktop Entry]\nType=Application\nName=Logi Switch\nExec=%s\n"
+                        "X-GNOME-Autostart-enabled=true\n" % " ".join(shlex.quote(a) for a in args))
+        elif os.path.exists(path):
+            os.remove(path)
+    lf.log.info("abrir al iniciar sesion: %s", "si" if on else "no")
+
+
+# ------------------------------------------------------- instancia unica ----
+INSTANCE_PORT = 47812   # solo en 127.0.0.1
+
+
+def claim_instance():
+    """Devuelve el socket si somos la primera instancia, o None si ya hay otra."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    if WIN:
+        s.setsockopt(socket.SOL_SOCKET, getattr(socket, "SO_EXCLUSIVEADDRUSE", -5), 1)
+    try:
+        s.bind(("127.0.0.1", INSTANCE_PORT))
+        s.listen(4)
+        return s
+    except OSError:
+        s.close()
+        return None
+
+
+def ask_running_instance_to_show():
+    try:
+        with socket.create_connection(("127.0.0.1", INSTANCE_PORT), timeout=1) as c:
+            c.sendall(b"show")
+    except OSError:
+        pass
 
 
 class App:
@@ -115,7 +225,10 @@ class App:
         cv.bind("<Button-2>", self.on_rename)
         for n in (1, 2, 3):
             root.bind(str(n), lambda e, n=n: self.switch(n))
-        root.bind("<Escape>", lambda e: root.destroy())
+        root.bind("<Escape>", lambda e: self.hide())
+        root.protocol("WM_DELETE_WINDOW", self.hide)          # boton cerrar (macOS/Linux)
+        if sys.platform == "darwin":                          # clic en el Dock la vuelve a mostrar
+            root.createcommand("::tk::mac::ReopenApplication", self.show)
 
         self.draw()
         root.after(100, self.pump)
@@ -127,7 +240,11 @@ class App:
     def pump(self):
         changed = False
         while not self.q.empty():
-            self.state = self.q.get()
+            item = self.q.get()
+            if item == "show":
+                self.show()
+                continue
+            self.state = item
             changed = True
         if changed:
             if not self.state["here"]:
@@ -232,7 +349,7 @@ class App:
         if h is None or h != self.pressed:
             return
         if h == "close":
-            self.root.destroy()
+            self.hide()
         else:
             self.switch(h)
 
@@ -255,9 +372,51 @@ class App:
             self.sending = None
             self.draw()
 
+    # ------------------------------------------------- mostrar / ocultar --
+    def hide(self):
+        self.inside = False
+        self.root.withdraw()
+        lf.log.info("ventana escondida; el agente sigue corriendo")
+
+    def show(self):
+        lf.log.info("mostrar ventana")
+        self.root.deiconify()
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        self.root.after(200, lambda: self.root.attributes("-topmost", False))
+        try:
+            self.root.focus_force()
+        except tk.TclError:
+            pass
+
+    def listen_for_show(self, sock):
+        def loop():
+            while True:
+                try:
+                    c, _ = sock.accept()
+                    with c:
+                        if c.recv(16).startswith(b"show"):
+                            self.q.put("show")
+                except OSError:
+                    return
+        threading.Thread(target=loop, daemon=True).start()
+
+    def menu(self, e):
+        m = tk.Menu(self.root, tearoff=0)
+        self.auto_var = tk.BooleanVar(value=autostart_enabled())
+        m.add_checkbutton(label="Abrir al iniciar sesión", variable=self.auto_var,
+                          command=lambda: set_autostart(self.auto_var.get()))
+        m.add_separator()
+        m.add_command(label="Salir", command=self.root.destroy)
+        try:
+            m.tk_popup(e.x_root, e.y_root)
+        finally:
+            m.grab_release()
+
     def on_rename(self, e):
         n = self.hit(e.x, e.y)
         if not isinstance(n, int):
+            self.menu(e)
             return
         cur = self.state["names"].get(str(n), "")
         name = simpledialog.askstring("Nombre", "Nombre para el canal %d:" % n,
@@ -267,7 +426,16 @@ class App:
 
 
 def main():
-    args = lf.build_parser().parse_args(sys.argv[1:])
+    argv = sys.argv[1:]
+    hidden = "--hidden" in argv
+    argv = [a for a in argv if a != "--hidden"]
+    args = lf.build_parser().parse_args(argv)
+
+    inst = claim_instance()
+    if inst is None:                    # ya hay una corriendo: que se muestre y salir
+        if not hidden:
+            ask_running_instance_to_show()
+        return
     try:
         import pynput  # noqa: F401
         args.keys = True        # escuchar F18-F20 del Keychron si se puede
@@ -287,13 +455,16 @@ def main():
     S = root.winfo_fpixels("1i") / 96.0
     agent = lf.Agent(args)
     app = App(root, agent)
+    app.listen_for_show(inst)
     agent.on_state = app.push_state
     threading.Thread(target=agent.run, daemon=True).start()
     if WIN:
         try:
-            app.hwnd = win_frameless(root)
+            app.hwnd = win_frameless(root, show=not hidden)
         except Exception as e:
             lf.log.warning("ventana sin barra no disponible: %s", e)
+    if hidden:
+        root.withdraw()
     root.mainloop()
 
 

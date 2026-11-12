@@ -32,7 +32,13 @@ en `~/.logi_follow.json`).
 - Clic en un número (o teclas `1`/`2`/`3`): manda el mouse a ese canal.
 - Clic derecho en un número: ponerle nombre ("Laptop", "Mac"…).
 - Si el mouse está en otra máquina, los números se apagan: desde aquí ya no se le puede hablar.
-- Arrastra para mover; `Esc` o la `×` (aparece al pasar el mouse) para cerrar.
+- Arrastra para mover. `Esc` o la `×` (aparece al pasar el mouse) **esconden** la ventana: la app
+  sigue corriendo y el mouse sigue al teclado. Vuelve a abrir la app (o clic en el Dock en macOS)
+  para mostrarla.
+- Clic derecho en una zona vacía: **Abrir al iniciar sesión** (arranca escondida) y **Salir**.
+
+> El mouse solo sigue al teclado si la app está corriendo en la máquina donde está el teclado.
+> Activa "Abrir al iniciar sesión" en cada máquina.
 
 ## Desde el código
 
